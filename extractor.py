@@ -29,6 +29,25 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 
+def _get_gemini_keys() -> List[str]:
+    """Collect all available Gemini API keys from env."""
+    keys = []
+    for k in ["GEMINI_API_KEY", "GEMINI_API_KEY_2", "GEMINI_API_KEY_3"]:
+        v = os.getenv(k, "").strip()
+        if v:
+            keys.append(v)
+    return keys
+
+GEMINI_KEYS = _get_gemini_keys()
+
+# Try to import pydantic-ai error type for quota detection
+try:
+    from pydantic_ai.exceptions import ModelHTTPError
+    HAS_MODEL_HTTP_ERROR = True
+except ImportError:
+    HAS_MODEL_HTTP_ERROR = False
+
+
 def pdf_to_images(pdf_bytes: bytes, dpi: int = 200) -> List[Image.Image]:
     """Convert PDF pages to PIL Images."""
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -190,22 +209,51 @@ DOCUMENT TEXT:
 Respond with ONLY the JSON object. No markdown, no explanations."""
 
 
+async def _llm_extract_with_key(text: str, api_key: str) -> PermitDocument:
+    """Extract using a single Gemini API key."""
+    from pydantic_ai.providers.google_gla import GoogleGLAProvider
+    model = GeminiModel("gemini-2.5-flash", provider=GoogleGLAProvider(api_key=api_key))
+    agent = Agent(model, output_type=PermitDocument)
+    result = await agent.run(_build_extraction_prompt(text))
+    return result.output
+
+
 async def _llm_extract(text: str) -> PermitDocument:
     """Extract using Pydantic AI with configured LLM provider."""
     if not HAS_PYDANTIC_AI:
         raise RuntimeError("pydantic-ai not installed. Use mock mode.")
 
-    if LLM_PROVIDER == "gemini" and GEMINI_API_KEY:
-        from pydantic_ai.providers.google_gla import GoogleGLAProvider
-        model = GeminiModel("gemini-2.5-flash", provider=GoogleGLAProvider(api_key=GEMINI_API_KEY))
+    if LLM_PROVIDER == "gemini":
+        last_error = None
+        for idx, key in enumerate(GEMINI_KEYS):
+            try:
+                return await _llm_extract_with_key(text, key)
+            except Exception as e:
+                err_str = str(e)
+                # If it's a quota/rate-limit error, try next key
+                is_quota = (
+                    "429" in err_str
+                    or "503" in err_str
+                    or "RESOURCE_EXHAUSTED" in err_str
+                    or "UNAVAILABLE" in err_str
+                    or "quota" in err_str.lower()
+                    or "rate limit" in err_str.lower()
+                    or "high demand" in err_str.lower()
+                )
+                if is_quota and idx < len(GEMINI_KEYS) - 1:
+                    continue
+                last_error = e
+        if last_error:
+            raise last_error
+        raise RuntimeError("No Gemini API keys configured. Set GEMINI_API_KEY in .env")
+
     elif LLM_PROVIDER == "openai" and OPENAI_API_KEY:
         model = OpenAIModel("gpt-4o", api_key=OPENAI_API_KEY)
+        agent = Agent(model, output_type=PermitDocument)
+        result = await agent.run(_build_extraction_prompt(text))
+        return result.output
     else:
         raise RuntimeError(f"LLM provider '{LLM_PROVIDER}' not configured. Set API key in .env")
-
-    agent = Agent(model, output_type=PermitDocument)
-    result = await agent.run(_build_extraction_prompt(text))
-    return result.data
 
 
 async def extract_permit_data(pdf_bytes: bytes) -> PermitDocument:
@@ -215,11 +263,28 @@ async def extract_permit_data(pdf_bytes: bytes) -> PermitDocument:
     Strategy:
     1. Extract raw text from PDF
     2. If MOCK mode: use keyword extraction
-    3. If LLM mode: use Pydantic AI with configured provider
+    3. If LLM mode: try each configured API key in order;
+       if all fail due to quota, fallback to mock extraction.
     """
     text = extract_pdf_text(pdf_bytes)
 
     if LLM_PROVIDER == "mock":
         return _mock_extract(text)
 
-    return await _llm_extract(text)
+    try:
+        return await _llm_extract(text)
+    except Exception as e:
+        err_str = str(e)
+        is_quota = (
+            "429" in err_str
+            or "503" in err_str
+            or "RESOURCE_EXHAUSTED" in err_str
+            or "UNAVAILABLE" in err_str
+            or "quota" in err_str.lower()
+            or "high demand" in err_str.lower()
+        )
+        if is_quota:
+            import logging
+            logging.warning("All Gemini keys rate-limited. Falling back to mock extraction.")
+            return _mock_extract(text)
+        raise
