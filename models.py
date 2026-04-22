@@ -8,37 +8,11 @@ from typing import Optional, List
 from enum import Enum
 
 
-class InverterType(str, Enum):
-    STRING = "string"
-    POWER_OPTIMIZER = "power_optimizer"
-    MICRO = "micro"
-    HYBRID = "hybrid"
-
-
-class MountingType(str, Enum):
-    ROOFTOP_RAILED = "rooftop_railed"
-    ROOFTOP_RAILLESS = "rooftop_railless"
-    GROUND_MOUNT = "ground_mount"
-    CARPORT = "carport"
-    TRACKER = "tracker"
-
-
-class RoofType(str, Enum):
-    ASPHALT_SHINGLE = "asphalt_shingle"
-    METAL_STANDING_SEAM = "metal_standing_seam"
-    METAL_CORRUGATED = "metal_corrugated"
-    TILE_CLAY = "tile_clay"
-    TILE_CONCRETE = "tile_concrete"
-    FLAT_TPO = "flat_tpo"
-    FLAT_EDPM = "flat_epdm"
-    WOOD_SHAKE = "wood_shake"
-
-
 class ElectricalSpec(BaseModel):
     """Electrical system specifications extracted from permit docs."""
     inverter_capacity_kw: Optional[float] = Field(None, description="Total inverter capacity in kW")
     inverter_quantity: Optional[int] = Field(None, description="Number of inverters")
-    inverter_type: Optional[InverterType] = Field(None, description="Type of inverter system")
+    inverter_type: Optional[str] = Field(None, description="Type of inverter system (string, power_optimizer, micro, hybrid)")
     inverter_model: Optional[str] = Field(None, description="Inverter manufacturer model number")
     panel_capacity_w: Optional[float] = Field(None, description="Panel wattage rating")
     panel_quantity: Optional[int] = Field(None, description="Total number of panels")
@@ -60,8 +34,8 @@ class ElectricalSpec(BaseModel):
 
 class StructuralSpec(BaseModel):
     """Structural and mounting specifications."""
-    mounting_type: Optional[MountingType] = Field(None, description="Type of mounting system")
-    roof_type: Optional[RoofType] = Field(None, description="Type of roof covering")
+    mounting_type: Optional[str] = Field(None, description="Type of mounting system")
+    roof_type: Optional[str] = Field(None, description="Type of roof covering")
     roof_age_years: Optional[int] = Field(None, description="Estimated roof age in years")
     roof_condition: Optional[str] = Field(None, description="Roof condition assessment")
     structural_load_limit_psf: Optional[float] = Field(None, description="Maximum structural load in psf")

@@ -156,6 +156,20 @@ def _build_extraction_prompt(text: str) -> str:
     """Build the prompt for LLM extraction."""
     return f"""You are a solar permit document analyzer. Extract the following structured information from the engineering document text below.
 
+For each field, extract the value if clearly present in the text. If a field is not mentioned or cannot be determined, use null.
+
+Key extraction hints:
+- "grounding_method": Look for grounding electrode conductor details, grounding type (e.g., "equipment grounding conductor", "EGC", "grounding electrode conductor", "GEC", "system grounding", "Ufer ground", "ground rod"), wire size, and bonding method. Extract a concise description.
+- "interconnection_type": Look for "load-side", "supply-side", "line-side", "backfed breaker", "tap connection".
+- "inverter_model": Include manufacturer and model number (e.g., "SolarEdge SE10000H-US").
+- "panel_model": Include manufacturer and model (e.g., "LG Neon 2 400W").
+- "wire_gauge_awg": Extract the AWG value (e.g., "10 AWG"). Look for "PV Wire Gauge", "Wire Gauge", "conductor size".
+- "mounting_type": Look for "roof-mounted", "ground-mounted", "tracker", etc.
+- "attachment_method": Look for lag screw details, bolt size, embedment depth, rail system.
+- "flashing_method": Look for flashing type and sealant details.
+- "setback_distance_inches", "ridge_setback_inches", "edge_setback_inches": Extract numeric values in inches.
+- "max_wind_speed_mph": Look for "Design Wind Speed", "wind speed", "mph", "ASCE 7". Extract the numeric mph value.
+
 Output a JSON object matching this schema:
 {{
   "site_info": {{
@@ -210,12 +224,100 @@ Respond with ONLY the JSON object. No markdown, no explanations."""
 
 
 async def _llm_extract_with_key(text: str, api_key: str) -> PermitDocument:
-    """Extract using a single Gemini API key."""
-    from pydantic_ai.providers.google_gla import GoogleGLAProvider
-    model = GeminiModel("gemini-3.1-flash-lite-preview", provider=GoogleGLAProvider(api_key=api_key))
-    agent = Agent(model, output_type=PermitDocument)
-    result = await agent.run(_build_extraction_prompt(text))
-    return result.output
+    """Extract using a single Gemini API key via direct REST API."""
+    import httpx
+    import json
+
+    prompt = _build_extraction_prompt(text)
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key={api_key}"
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.0, "maxOutputTokens": 4096}
+    }
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
+        resp.raise_for_status()
+        data = resp.json()
+
+    try:
+        raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
+    except (KeyError, IndexError) as e:
+        raise RuntimeError(f"Unexpected Gemini response format: {e}")
+
+    # Clean up markdown code fences if present
+    cleaned = raw_text.strip()
+    if cleaned.startswith("```json"):
+        cleaned = cleaned[7:]
+    if cleaned.startswith("```"):
+        cleaned = cleaned[3:]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+    cleaned = cleaned.strip()
+
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"Failed to parse Gemini JSON output: {e}\nRaw: {raw_text[:500]}")
+
+    # Merge parsed JSON into PermitDocument
+    return _merge_into_permit_doc(parsed)
+
+
+def _merge_into_permit_doc(parsed: dict) -> PermitDocument:
+    """Merge parsed JSON dict into a PermitDocument model."""
+    from models import PermitDocument, ElectricalSpec, StructuralSpec, SiteInfo
+
+    site_info = parsed.get("site_info", {})
+    electrical = parsed.get("electrical", {})
+    structural = parsed.get("structural", {})
+
+    return PermitDocument(
+        site_info=SiteInfo(
+            project_address=site_info.get("project_address"),
+            city=site_info.get("city"),
+            state=site_info.get("state"),
+            zip_code=site_info.get("zip_code"),
+            jurisdiction_name=site_info.get("jurisdiction_name"),
+            nec_edition=site_info.get("nec_edition"),
+            utility_company=site_info.get("utility_company"),
+            service_voltage_v=site_info.get("service_voltage_v"),
+            service_amperage_a=site_info.get("service_amperage_a"),
+        ),
+        electrical=ElectricalSpec(
+            inverter_capacity_kw=electrical.get("inverter_capacity_kw"),
+            inverter_quantity=electrical.get("inverter_quantity"),
+            inverter_type=electrical.get("inverter_type"),
+            inverter_model=electrical.get("inverter_model"),
+            panel_capacity_w=electrical.get("panel_capacity_w"),
+            panel_quantity=electrical.get("panel_quantity"),
+            panel_model=electrical.get("panel_model"),
+            system_size_kw_dc=electrical.get("system_size_kw_dc"),
+            system_size_kw_ac=electrical.get("system_size_kw_ac"),
+            wire_gauge_awg=electrical.get("wire_gauge_awg"),
+            ocpd_rating_a=electrical.get("ocpd_rating_a"),
+            main_breaker_rating_a=electrical.get("main_breaker_rating_a"),
+            busbar_rating_a=electrical.get("busbar_rating_a"),
+            grounding_method=electrical.get("grounding_method"),
+            interconnection_type=electrical.get("interconnection_type"),
+            rapid_shutdown=electrical.get("rapid_shutdown"),
+            afci_protection=electrical.get("afci_protection"),
+        ),
+        structural=StructuralSpec(
+            mounting_type=structural.get("mounting_type"),
+            roof_type=structural.get("roof_type"),
+            structural_load_limit_psf=structural.get("structural_load_limit_psf"),
+            max_wind_speed_mph=structural.get("max_wind_speed_mph"),
+            max_snow_load_psf=structural.get("max_snow_load_psf"),
+            attachment_method=structural.get("attachment_method"),
+            flashing_method=structural.get("flashing_method"),
+            setback_distance_inches=structural.get("setback_distance_inches"),
+            ridge_setback_inches=structural.get("ridge_setback_inches"),
+            edge_setback_inches=structural.get("edge_setback_inches"),
+            rail_manufacturer=structural.get("rail_manufacturer"),
+        ),
+    )
 
 
 async def _llm_extract(text: str) -> PermitDocument:

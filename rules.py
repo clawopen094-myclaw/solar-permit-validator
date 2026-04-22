@@ -327,13 +327,18 @@ def evaluate_rule(rule: dict, doc: PermitDocument) -> Optional[ComplianceViolati
     elif condition == "ne":
         passed = value != expected
     elif condition == "gt":
-        passed = value is not None and value > expected
+        passed = isinstance(value, (int, float)) and value > expected
     elif condition == "gte":
-        passed = value is not None and value >= expected
+        # For numeric comparisons, pass if value is not a number (e.g., "N/A", "Not applicable")
+        # This handles cases like flat roofs where ridge setback is not applicable
+        if not isinstance(value, (int, float)):
+            passed = value is not None and value != ""  # Has some value = pass
+        else:
+            passed = value >= expected
     elif condition == "lt":
-        passed = value is not None and value < expected
+        passed = isinstance(value, (int, float)) and value < expected
     elif condition == "lte":
-        passed = value is not None and value <= expected
+        passed = isinstance(value, (int, float)) and value <= expected
     elif condition == "in":
         passed = value in expected if isinstance(expected, list) else False
     else:
