@@ -212,7 +212,7 @@ Respond with ONLY the JSON object. No markdown, no explanations."""
 async def _llm_extract_with_key(text: str, api_key: str) -> PermitDocument:
     """Extract using a single Gemini API key."""
     from pydantic_ai.providers.google_gla import GoogleGLAProvider
-    model = GeminiModel("gemini-2.5-flash", provider=GoogleGLAProvider(api_key=api_key))
+    model = GeminiModel("gemini-3.1-flash-lite-preview", provider=GoogleGLAProvider(api_key=api_key))
     agent = Agent(model, output_type=PermitDocument)
     result = await agent.run(_build_extraction_prompt(text))
     return result.output
