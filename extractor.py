@@ -190,24 +190,25 @@ DOCUMENT TEXT:
 Respond with ONLY the JSON object. No markdown, no explanations."""
 
 
-def _llm_extract(text: str) -> PermitDocument:
+async def _llm_extract(text: str) -> PermitDocument:
     """Extract using Pydantic AI with configured LLM provider."""
     if not HAS_PYDANTIC_AI:
         raise RuntimeError("pydantic-ai not installed. Use mock mode.")
 
     if LLM_PROVIDER == "gemini" and GEMINI_API_KEY:
-        model = GeminiModel("gemini-1.5-pro", api_key=GEMINI_API_KEY)
+        from pydantic_ai.providers.google_gla import GoogleGLAProvider
+        model = GeminiModel("gemini-2.5-flash", provider=GoogleGLAProvider(api_key=GEMINI_API_KEY))
     elif LLM_PROVIDER == "openai" and OPENAI_API_KEY:
         model = OpenAIModel("gpt-4o", api_key=OPENAI_API_KEY)
     else:
         raise RuntimeError(f"LLM provider '{LLM_PROVIDER}' not configured. Set API key in .env")
 
-    agent = Agent(model, result_type=PermitDocument)
-    result = agent.run_sync(_build_extraction_prompt(text))
+    agent = Agent(model, output_type=PermitDocument)
+    result = await agent.run(_build_extraction_prompt(text))
     return result.data
 
 
-def extract_permit_data(pdf_bytes: bytes) -> PermitDocument:
+async def extract_permit_data(pdf_bytes: bytes) -> PermitDocument:
     """
     Main entry point: extract structured data from a permit PDF.
 
@@ -221,4 +222,4 @@ def extract_permit_data(pdf_bytes: bytes) -> PermitDocument:
     if LLM_PROVIDER == "mock":
         return _mock_extract(text)
 
-    return _llm_extract(text)
+    return await _llm_extract(text)

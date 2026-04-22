@@ -13,6 +13,9 @@ import uuid
 from datetime import datetime
 from typing import List, Optional
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, File, UploadFile, HTTPException, Query
 from fastapi.responses import JSONResponse
 
@@ -77,7 +80,7 @@ async def validate_permit(
 
     # Extract structured data from PDF
     try:
-        doc = extract_permit_data(pdf_bytes)
+        doc = await extract_permit_data(pdf_bytes)
     except Exception as e:
         raise HTTPException(500, detail=f"Document extraction failed: {str(e)}")
 
