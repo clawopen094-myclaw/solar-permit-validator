@@ -41,17 +41,17 @@ def init_db():
         # --- Electrical Rules ---
         {
             "id": "NEC690.7-01",
-            "name": "DC Voltage Limit",
+            "name": "DC System Size Residential Limit",
             "category": "electrical",
             "severity": "critical",
             "jurisdictions": None,
             "nec_editions": json.dumps(["2020", "2023"]),
             "field_path": "electrical.system_size_kw_dc",
             "condition_type": "lte",
-            "expected_value": json.dumps(25.0),
-            "error_message": "Residential DC system size exceeds typical single-phase residential limit.",
+            "expected_value": json.dumps(100.0),  # Commercial can be larger
+            "error_message": "DC system size exceeds reasonable limit. Verify calculations.",
             "reference": "NEC 690.7, 705.12",
-            "fix_suggestion": "Verify system size calculation or upgrade service panel to 400A."
+            "fix_suggestion": "Verify system size calculation and service panel capacity."
         },
         {
             "id": "NEC690.8-01",
@@ -208,7 +208,7 @@ def init_db():
             "reference": "ASCE 7-22, IBC 1609",
             "fix_suggestion": "Add design wind speed from local wind map to structural notes."
         },
-        # --- Jurisdiction-Specific Examples ---
+        # --- California Rules ---
         {
             "id": "LA-CITY-01",
             "name": "LA City: Structural Engineer Stamp",
@@ -238,6 +238,35 @@ def init_db():
             "fix_suggestion": "Annotate supply-side or load-side connection on single-line diagram."
         },
         {
+            "id": "CA-Title24-01",
+            "name": "California: Title 24 Compliance",
+            "category": "electrical",
+            "severity": "major",
+            "jurisdictions": json.dumps(["California", "CA"]),
+            "nec_editions": json.dumps(["2020", "2023"]),
+            "field_path": "electrical.afci_protection",
+            "condition_type": "eq",
+            "expected_value": json.dumps(True),
+            "error_message": "California Title 24 requires AFCI protection for solar PV systems.",
+            "reference": "California Title 24, Part 6, JA7",
+            "fix_suggestion": "Ensure AFCI protection is specified (inverter-integrated or external)."
+        },
+        {
+            "id": "SD-CITY-01",
+            "name": "San Diego: Fire Dept Approval",
+            "category": "fire_safety",
+            "severity": "critical",
+            "jurisdictions": json.dumps(["San Diego", "City of San Diego"]),
+            "nec_editions": None,
+            "field_path": "structural.setback_distance_inches",
+            "condition_type": "gte",
+            "expected_value": json.dumps(36.0),
+            "error_message": "San Diego requires 36-inch setbacks from all roof edges for commercial buildings.",
+            "reference": "San Diego Fire-Rescue Department, Solar PV Guideline",
+            "fix_suggestion": "Increase setbacks to 36 inches or obtain SDFD variance."
+        },
+        # --- New York Rules ---
+        {
             "id": "NYC-01",
             "name": "NYC: FDNY Fire Safety Plan",
             "category": "fire_safety",
@@ -250,6 +279,197 @@ def init_db():
             "error_message": "NYC FDNY requires 36-inch setbacks from all roof edges.",
             "reference": "FDNY Fire Code, NYC Building Code 1504.2",
             "fix_suggestion": "Increase all setbacks to 36 inches or obtain FDNY variance."
+        },
+        {
+            "id": "NYC-02",
+            "name": "NYC: Registered Design Professional",
+            "category": "documentation",
+            "severity": "critical",
+            "jurisdictions": json.dumps(["New York City", "NYC", "City of New York"]),
+            "nec_editions": None,
+            "field_path": "structural.structural_load_limit_psf",
+            "condition_type": "exists",
+            "expected_value": None,
+            "error_message": "NYC requires stamped structural drawings from a NYS-registered design professional.",
+            "reference": "NYC Building Code 1704, 1609",
+            "fix_suggestion": "Obtain structural engineering stamp from a NYS-licensed PE or RA."
+        },
+        # --- Florida Rules ---
+        {
+            "id": "FL-MIAMI-01",
+            "name": "Miami-Dade: HVHZ Product Approval",
+            "category": "structural",
+            "severity": "critical",
+            "jurisdictions": json.dumps(["Miami", "Miami-Dade", "City of Miami"]),
+            "nec_editions": None,
+            "field_path": "structural.max_wind_speed_mph",
+            "condition_type": "gte",
+            "expected_value": json.dumps(170.0),
+            "error_message": "Miami-Dade HVHZ requires product approval for 170+ mph wind speeds.",
+            "reference": "Miami-Dade County Code, Florida Building Code TAS 201",
+            "fix_suggestion": "Verify all components have Miami-Dade NOA or Florida Product Approval."
+        },
+        {
+            "id": "FL-BATTERY-01",
+            "name": "Florida: Battery Storage Requirements",
+            "category": "electrical",
+            "severity": "major",
+            "jurisdictions": json.dumps(["Florida", "FL", "Miami", "Tampa", "Orlando"]),
+            "nec_editions": json.dumps(["2020", "2023"]),
+            "field_path": "electrical.inverter_type",
+            "condition_type": "exists",
+            "expected_value": None,
+            "error_message": "Florida requires battery storage systems to meet UL 9540 and UL 1973.",
+            "reference": "Florida Building Code 609, NEC 706",
+            "fix_suggestion": "If battery storage is included, provide UL 9540 test reports and installation manual."
+        },
+        # --- Texas Rules ---
+        {
+            "id": "TX-ERCOT-01",
+            "name": "Texas: ERCOT Interconnection",
+            "category": "electrical",
+            "severity": "major",
+            "jurisdictions": json.dumps(["Texas", "TX", "Austin", "Houston", "Dallas"]),
+            "nec_editions": json.dumps(["2020", "2023"]),
+            "field_path": "electrical.interconnection_type",
+            "condition_type": "exists",
+            "expected_value": None,
+            "error_message": "Texas ERCOT requires interconnection agreement and IEEE 1547 compliance.",
+            "reference": "ERCOT Interconnection Guide, IEEE 1547-2018",
+            "fix_suggestion": "Submit ERCOT interconnection application and IEEE 1547 test results."
+        },
+        {
+            "id": "TX-WIND-01",
+            "name": "Texas: Wind Load Design",
+            "category": "structural",
+            "severity": "major",
+            "jurisdictions": json.dumps(["Texas", "TX"]),
+            "nec_editions": None,
+            "field_path": "structural.max_wind_speed_mph",
+            "condition_type": "gte",
+            "expected_value": json.dumps(115.0),
+            "error_message": "Texas requires minimum 115 mph design wind speed for solar installations.",
+            "reference": "Texas Administrative Code Title 16, IBC 1609",
+            "fix_suggestion": "Verify design wind speed meets local requirements (typically 115-140 mph)."
+        },
+        # --- Arizona Rules ---
+        {
+            "id": "AZ-SETBACK-01",
+            "name": "Arizona: Fire Setback Requirements",
+            "category": "fire_safety",
+            "severity": "critical",
+            "jurisdictions": json.dumps(["Arizona", "AZ", "Phoenix", "Tucson"]),
+            "nec_editions": None,
+            "field_path": "structural.setback_distance_inches",
+            "condition_type": "gte",
+            "expected_value": json.dumps(18.0),
+            "error_message": "Arizona requires minimum 18-inch setbacks from all roof edges.",
+            "reference": "Arizona Fire Code, IFC 605",
+            "fix_suggestion": "Ensure setbacks meet minimum 18-inch requirement."
+        },
+        {
+            "id": "AZ-HEAT-01",
+            "name": "Arizona: High Temperature Derating",
+            "category": "electrical",
+            "severity": "major",
+            "jurisdictions": json.dumps(["Arizona", "AZ", "Phoenix", "Tucson"]),
+            "nec_editions": json.dumps(["2020", "2023"]),
+            "field_path": "electrical.wire_gauge_awg",
+            "condition_type": "exists",
+            "expected_value": None,
+            "error_message": "Arizona high temperatures require conductor ampacity derating per NEC 310.15.",
+            "reference": "NEC 310.15, Phoenix ambient 115°F design",
+            "fix_suggestion": "Verify conductor ampacity at 75°C or 90°C rating for ambient conditions."
+        },
+        # --- Nevada Rules ---
+        {
+            "id": "NV-SEISMIC-01",
+            "name": "Nevada: Seismic Bracing",
+            "category": "structural",
+            "severity": "critical",
+            "jurisdictions": json.dumps(["Nevada", "NV", "Las Vegas", "Reno"]),
+            "nec_editions": None,
+            "field_path": "structural.attachment_method",
+            "condition_type": "exists",
+            "expected_value": None,
+            "error_message": "Nevada seismic zones require seismic bracing for solar arrays.",
+            "reference": "Nevada Administrative Code, IBC 1613, ASCE 7",
+            "fix_suggestion": "Provide seismic bracing details and calculations per ASCE 7 Chapter 13."
+        },
+        # --- Colorado Rules ---
+        {
+            "id": "CO-SNOW-01",
+            "name": "Colorado: Snow Load Design",
+            "category": "structural",
+            "severity": "major",
+            "jurisdictions": json.dumps(["Colorado", "CO", "Denver", "Boulder"]),
+            "nec_editions": None,
+            "field_path": "structural.max_snow_load_psf",
+            "condition_type": "exists",
+            "expected_value": None,
+            "error_message": "Colorado requires snow load calculations for solar arrays.",
+            "reference": "Colorado Building Code, IBC 1608, ASCE 7-22",
+            "fix_suggestion": "Provide snow load calculations per ASCE 7-22 Section 7."
+        },
+        # --- Massachusetts Rules ---
+        {
+            "id": "MA-SMART-01",
+            "name": "Massachusetts: SMART Program",
+            "category": "electrical",
+            "severity": "major",
+            "jurisdictions": json.dumps(["Massachusetts", "MA", "Boston"]),
+            "nec_editions": json.dumps(["2020", "2023"]),
+            "field_path": "electrical.system_size_kw_ac",
+            "condition_type": "lte",
+            "expected_value": json.dumps(5000.0),
+            "error_message": "Massachusetts SMART program has capacity limits.",
+            "reference": "Massachusetts SMART Program, 225 CMR 14.00",
+            "fix_suggestion": "Verify system qualifies for SMART program incentives."
+        },
+        # --- New Jersey Rules ---
+        {
+            "id": "NJ-SREC-01",
+            "name": "New Jersey: SREC-II Registration",
+            "category": "documentation",
+            "severity": "major",
+            "jurisdictions": json.dumps(["New Jersey", "NJ"]),
+            "nec_editions": None,
+            "field_path": "electrical.system_size_kw_dc",
+            "condition_type": "lte",
+            "expected_value": json.dumps(5000.0),
+            "error_message": "New Jersey SREC-II program requires registration for systems over 1 MW.",
+            "reference": "New Jersey Board of Public Utilities, SREC-II",
+            "fix_suggestion": "Register system with NJ SREC-II program if applicable."
+        },
+        # --- Illinois Rules ---
+        {
+            "id": "IL-NETMETER-01",
+            "name": "Illinois: Net Metering Agreement",
+            "category": "electrical",
+            "severity": "major",
+            "jurisdictions": json.dumps(["Illinois", "IL", "Chicago"]),
+            "nec_editions": json.dumps(["2020", "2023"]),
+            "field_path": "electrical.interconnection_type",
+            "condition_type": "exists",
+            "expected_value": None,
+            "error_message": "Illinois requires net metering agreement with utility.",
+            "reference": "Illinois Commerce Commission, 220 ILCS 5/16-107.5",
+            "fix_suggestion": "Submit net metering application to ComEd or local utility."
+        },
+        # --- Hawaii Rules ---
+        {
+            "id": "HI-HURRICANE-01",
+            "name": "Hawaii: Hurricane Resistance",
+            "category": "structural",
+            "severity": "critical",
+            "jurisdictions": json.dumps(["Hawaii", "HI", "Honolulu"]),
+            "nec_editions": None,
+            "field_path": "structural.max_wind_speed_mph",
+            "condition_type": "gte",
+            "expected_value": json.dumps(130.0),
+            "error_message": "Hawaii requires 130+ mph wind design for hurricane zones.",
+            "reference": "Hawaii State Building Code, IBC 1609",
+            "fix_suggestion": "Design for minimum 130 mph wind speed per Hawaii hurricane requirements."
         },
     ]
 
@@ -315,6 +535,36 @@ def _get_nested_value(obj: Any, path: str) -> Any:
 
 def evaluate_rule(rule: dict, doc: PermitDocument) -> Optional[ComplianceViolation]:
     """Evaluate a single rule against a permit document. Returns a violation if failed."""
+    
+    # --- Context-aware rule skipping ---
+    mounting_type = (doc.structural.mounting_type or "").lower()
+    roof_type = (doc.structural.roof_type or "").lower()
+    
+    # Skip roof-specific rules for ground mounts
+    if mounting_type in ["ground-mounted", "ground mount", "ground_mount"]:
+        if rule["id"] in ["IBC1607-01", "FIRE-RIDGE-01", "MOUNT-ATTACH-01", "FIRE-SETBACK-01"]:
+            return None
+    
+    # Skip ridge setback for flat roofs or N/A
+    if rule["id"] == "FIRE-RIDGE-01":
+        if any(x in roof_type for x in ["flat", "epdm", "tpo", "membrane", "n/a"]):
+            return None
+        ridge_val = _get_nested_value(doc, "structural.ridge_setback_inches")
+        if ridge_val is not None and not isinstance(ridge_val, (int, float)):
+            # Has a string value like "N/A" or "Not applicable" - skip
+            return None
+    
+    # Skip structural load for ground mounts
+    if rule["id"] == "IBC1607-01" and "ground" in mounting_type:
+        return None
+    
+    # Skip system size limit for commercial (arbitrary threshold > 50kW)
+    if rule["id"] == "NEC690.7-01":
+        dc_size = doc.electrical.system_size_kw_dc
+        if dc_size is not None and dc_size > 50:
+            # Commercial system - skip residential limit
+            return None
+    
     value = _get_nested_value(doc, rule["field_path"])
     condition = rule["condition_type"]
     expected = json.loads(rule["expected_value"]) if rule["expected_value"] is not None else None

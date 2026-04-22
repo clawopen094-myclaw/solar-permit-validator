@@ -16,12 +16,18 @@ from typing import List, Optional
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Depends, Header, status
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 
 from models import ComplianceReport, ComplianceViolation, ViolationSeverity
 from extractor import extract_permit_data
 from rules import validate_document, init_db
+from database import (
+    init_project_db, verify_api_key, create_api_key, list_api_keys,
+    save_project, get_project, list_projects, delete_project, get_stats
+)
 
 app = FastAPI(
     title="Solar Permit Pre-Flight Validator",
@@ -29,8 +35,33 @@ app = FastAPI(
     version="0.1.0"
 )
 
-# Initialize rules database on startup
+# CORS for frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Serve static frontend files
+import os as _os
+frontend_dir = _os.path.join(_os.path.dirname(__file__), "frontend")
+if _os.path.exists(frontend_dir):
+    app.mount("/static", StaticFiles(directory=frontend_dir), name="static")
+
+# Initialize databases on startup
 init_db()
+init_project_db()
+
+# --- Auth dependency ---
+async def require_api_key(x_api_key: str = Header(None, alias="X-API-Key")):
+    """Require a valid API key for protected endpoints."""
+    if not x_api_key:
+        raise HTTPException(status_code=401, detail="X-API-Key header required")
+    if not verify_api_key(x_api_key):
+        raise HTTPException(status_code=403, detail="Invalid or expired API key")
+    return x_api_key
 
 
 @app.get("/health")
@@ -51,11 +82,65 @@ def list_rules(
     return {"count": len(rules), "rules": rules}
 
 
+# --- Project endpoints ---
+
+@app.get("/projects")
+def projects_list(limit: int = 50, offset: int = 0, api_key: str = Depends(require_api_key)):
+    """List all validation projects."""
+    return {"projects": list_projects(limit, offset)}
+
+
+@app.get("/projects/{project_id}")
+def projects_get(project_id: str, api_key: str = Depends(require_api_key)):
+    """Get a single project with violations."""
+    project = get_project(project_id)
+    if not project:
+        raise HTTPException(404, detail="Project not found")
+    return project
+
+
+@app.delete("/projects/{project_id}")
+def projects_delete(project_id: str, api_key: str = Depends(require_api_key)):
+    """Delete a project and its violations."""
+    if delete_project(project_id):
+        return {"message": "Project deleted"}
+    raise HTTPException(404, detail="Project not found")
+
+
+@app.get("/stats")
+def stats_overview(api_key: str = Depends(require_api_key)):
+    """Get aggregate statistics across all projects."""
+    return get_stats()
+
+
+# --- Auth endpoints ---
+
+@app.post("/auth/keys")
+def auth_create_key(name: str = None, admin_key: str = Header(None, alias="X-Admin-Key")):
+    """Create a new API key. Requires admin key (set ADMIN_KEY env var)."""
+    expected = os.getenv("ADMIN_KEY")
+    if expected and admin_key != expected:
+        raise HTTPException(403, detail="Invalid admin key")
+    key = create_api_key(name)
+    return {"api_key": key, "name": name, "message": "Store this key securely - it will not be shown again"}
+
+
+@app.get("/auth/keys")
+def auth_list_keys(admin_key: str = Header(None, alias="X-Admin-Key")):
+    """List all API keys (admin only)."""
+    expected = os.getenv("ADMIN_KEY")
+    if expected and admin_key != expected:
+        raise HTTPException(403, detail="Invalid admin key")
+    return {"keys": list_api_keys()}
+
+
 @app.post("/validate_permit", response_model=ComplianceReport)
 async def validate_permit(
     file: UploadFile = File(..., description="Permit PDF (plan set, SLD, or spec sheet)"),
     project_id: Optional[str] = Query(None, description="Optional project identifier"),
-    jurisdiction: Optional[str] = Query(None, description="Override jurisdiction name")
+    jurisdiction: Optional[str] = Query(None, description="Override jurisdiction name"),
+    save: bool = Query(True, description="Save result to project database"),
+    api_key: Optional[str] = Depends(require_api_key)
 ):
     """
     Upload a solar permit PDF and receive a compliance report.
@@ -132,6 +217,27 @@ async def validate_permit(
             f"Address critical issues before submitting to {doc.site_info.jurisdiction_name or 'AHJ'}."
         )
 
+    # Save to database
+    if save:
+        import json
+        violations_dict = [v.model_dump() for v in violations]
+        save_project(
+            project_id=project_id,
+            name=file.filename,
+            jurisdiction=doc.site_info.jurisdiction_name or jurisdiction or "Unknown",
+            status=status,
+            pass_rate=round(pass_rate, 1),
+            violations=violations_dict,
+            raw_json=json.dumps({
+                "project_id": project_id,
+                "filename": file.filename,
+                "status": status,
+                "pass_rate": pass_rate,
+                "violations_count": len(violations),
+                "jurisdiction": doc.site_info.jurisdiction_name,
+            })
+        )
+
     return ComplianceReport(
         project_id=project_id,
         ahj_name=doc.site_info.jurisdiction_name or "Unknown AHJ",
@@ -145,6 +251,10 @@ async def validate_permit(
 
 @app.get("/")
 def root():
+    """Serve the React frontend."""
+    frontend_index = _os.path.join(frontend_dir, "index.html")
+    if _os.path.exists(frontend_index):
+        return FileResponse(frontend_index)
     return {
         "service": "Solar Permit Pre-Flight Validator",
         "version": "0.1.0",
